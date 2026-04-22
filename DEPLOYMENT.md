@@ -83,6 +83,15 @@ The schema gets pushed automatically on first start, but you need to seed the in
    ```
 3. You should see `Seed completed successfully`.
 
+## Step 4.5 — Set NEXTAUTH_URL
+
+Once `rd-web` shows "Live", grab its URL from the Render dashboard (e.g. `https://rd-web-xxxx.onrender.com`).
+
+Open `rd-web` → **Environment** → set:
+- `NEXTAUTH_URL` = the full URL above (or your custom domain — see Step 6)
+
+Save. Render auto-redeploys.
+
 ## Step 5 — Log in
 
 Find your web app URL in the `rd-web` service dashboard (something like `https://rd-web-xxxx.onrender.com`).
@@ -102,6 +111,41 @@ db.user.update({
 }).then(()=>console.log('updated'));
 "
 ```
+
+## Step 6 — Custom domain (Cloudflare DNS)
+
+Recommended: a subdomain like `rd.dhsecheron.com` (cleaner, easier DNS).
+
+### In Render
+1. `rd-web` → **Settings** → **Custom Domains** → **Add Custom Domain**
+2. Type your subdomain: `rd.dhsecheron.com` → **Save**
+3. Render shows a CNAME target (looks like `rd-web-xxxx.onrender.com`). **Copy it.**
+
+### In Cloudflare
+1. Sign in → select your domain (`dhsecheron.com`)
+2. Sidebar → **DNS → Records → Add record**
+3. Fill in:
+   - **Type:** `CNAME`
+   - **Name:** `rd` (just the subdomain prefix, Cloudflare appends `.dhsecheron.com`)
+   - **Target:** the `xxxx.onrender.com` value Render gave you
+   - **Proxy status:** **DNS only** (gray cloud, NOT orange) — required for Render's SSL to work
+   - **TTL:** Auto
+4. **Save**
+
+### Back in Render
+1. Wait 1-2 minutes for DNS to propagate
+2. Render → `rd-web` → Custom Domains → click **Verify** next to your domain
+3. Once verified, Render auto-issues a Let's Encrypt SSL certificate (~2 min)
+4. Update `NEXTAUTH_URL` env var on `rd-web` to `https://rd.dhsecheron.com`
+
+Done. `https://rd.dhsecheron.com` now serves your R&D engine with valid SSL.
+
+### Optional: enable Cloudflare proxy (recommended later)
+
+Once everything works, you can flip the orange cloud back on for DDoS protection + caching:
+- Cloudflare DNS → click the gray cloud next to `rd` → turns orange
+- Cloudflare → SSL/TLS → set encryption mode to **Full (strict)**
+- This adds Cloudflare's edge between users and Render
 
 ## Adding teammates
 
