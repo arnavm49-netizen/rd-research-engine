@@ -1,0 +1,341 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───
+
+enum SystemRole {
+  ADMIN
+  RESEARCHER
+  VIEWER
+}
+
+enum ClassificationLevel {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+enum DocumentType {
+  PAPER
+  JOURNAL
+  BOOK
+  REPORT
+  DATASET
+  IMAGE
+  TEST_REPORT
+  PATENT
+  STANDARD
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING_UPLOAD
+  PENDING_INGESTION
+  PROCESSING
+  INGESTED
+  FAILED
+  ARCHIVED
+}
+
+enum DiscoveryStatus {
+  NEW
+  FLAGGED
+  APPROVED
+  REJECTED
+  INGESTED
+}
+
+enum QueryMode {
+  AI_SYNTHESIS
+  RETRIEVAL_ONLY
+}
+
+enum AlertFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+// ─── Models ───
+
+model User {
+  id                   String              @id @default(cuid())
+  email                String              @unique
+  name                 String
+  passwordHash         String
+  role                 SystemRole          @default(RESEARCHER)
+  classificationAccess ClassificationLevel @default(INTERNAL)
+  isActive             Boolean             @default(true)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  documents    Document[]
+  queryLogs    QueryLog[]
+  annotations  Annotation[]
+  alerts       ResearchAlert[]
+  auditLogs    AuditLog[]       @relation("AuditActor")
+
+  @@map("users")
+}
+
+model Document {
+  id              String              @id @default(cuid())
+  title           String
+  authors         String[]
+  abstract        String?             @db.Text
+  type            DocumentType        @default(PAPER)
+  classification  ClassificationLevel @default(PUBLIC)
+  status          DocumentStatus      @default(PENDING_UPLOAD)
+  fileKey         String?
+  fileName        String?
+  fileSize        Int?
+  mimeType        String?
+  language        String?             @default("en")
+  doi             String?             @unique
+  publicationYear Int?
+  source          String?
+  metadata        Json?
+  errorMessage    String?             @db.Text
+  uploadedById    String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  uploadedBy      User?               @relation(fields: [uploadedById], references: [id])
+  chunks          DocumentChunk[]
+  researchAreas   DocumentResearchArea[]
+  annotations     Annotation[]
+  sourceCitations Citation[]          @relation("SourceDoc")
+  targetCitations Citation[]          @relation("TargetDoc")
+  formulas        Formula[]
+  queryDocuments  QueryDocument[]
+
+  @@index([classification])
+  @@index([type])
+  @@index([status])
+  @@index([doi])
+  @@map("documents")
+}
+
+model DocumentChunk {
+  id            String   @id @default(cuid())
+  documentId    String
+  chunkIndex    Int
+  content       String   @db.Text
+  sectionHeader String?
+  embeddingId   String?
+  tokenCount    Int?
+  createdAt     DateTime @default(now())
+
+  document    Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  annotations Annotation[]
+
+  @@unique([documentId, chunkIndex])
+  @@index([documentId])
+  @@map("document_chunks")
+}
+
+model DiscoveredPaper {
+  id             String          @id @default(cuid())
+  title          String
+  authors        String[]
+  abstract       String?         @db.Text
+  doi            String?         @unique
+  url            String?
+  source         String
+  language       String?
+  publicationYear Int?
+  relevanceScore Float?
+  status         DiscoveryStatus @default(NEW)
+  metadata       Json?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  researchAreas  DiscoveredPaperResearchArea[]
+
+  @@index([status])
+  @@index([relevanceScore])
+  @@index([source])
+  @@map("discovered_papers")
+}
+
+model ResearchArea {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String? @db.Text
+  parentId    String?
+  keywords    String[]
+  isActive    Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent   ResearchArea?  @relation("ResearchAreaHierarchy", fields: [parentId], references: [id])
+  children ResearchArea[] @relation("ResearchAreaHierarchy")
+
+  documents        DocumentResearchArea[]
+  discoveredPapers DiscoveredPaperResearchArea[]
+  alerts           ResearchAlert[]
+
+  @@map("research_areas")
+}
+
+model DocumentResearchArea {
+  documentId     String
+  researchAreaId String
+
+  document     Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  researchArea ResearchArea @relation(fields: [researchAreaId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, researchAreaId])
+  @@map("document_research_areas")
+}
+
+model DiscoveredPaperResearchArea {
+  discoveredPaperId String
+  researchAreaId    String
+
+  discoveredPaper DiscoveredPaper @relation(fields: [discoveredPaperId], references: [id], onDelete: Cascade)
+  researchArea    ResearchArea    @relation(fields: [researchAreaId], references: [id], onDelete: Cascade)
+
+  @@id([discoveredPaperId, researchAreaId])
+  @@map("discovered_paper_research_areas")
+}
+
+model ResearchAlert {
+  id             String         @id @default(cuid())
+  userId         String
+  researchAreaId String
+  frequency      AlertFrequency @default(WEEKLY)
+  isActive       Boolean        @default(true)
+  lastTriggered  DateTime?
+  createdAt      DateTime       @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  researchArea ResearchArea @relation(fields: [researchAreaId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, researchAreaId])
+  @@map("research_alerts")
+}
+
+model Citation {
+  id           String  @id @default(cuid())
+  sourceDocId  String
+  targetDocId  String
+  context      String? @db.Text
+  createdAt    DateTime @default(now())
+
+  sourceDoc Document @relation("SourceDoc", fields: [sourceDocId], references: [id], onDelete: Cascade)
+  targetDoc Document @relation("TargetDoc", fields: [targetDocId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceDocId, targetDocId])
+  @@map("citations")
+}
+
+model QueryLog {
+  id             String    @id @default(cuid())
+  userId         String
+  query          String    @db.Text
+  response       String?   @db.Text
+  mode           QueryMode
+  classification ClassificationLevel
+  tokenCount     Int?
+  latencyMs      Int?
+  createdAt      DateTime  @default(now())
+
+  user      User            @relation(fields: [userId], references: [id])
+  documents QueryDocument[]
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("query_logs")
+}
+
+model QueryDocument {
+  queryLogId String
+  documentId String
+  chunkIndex Int?
+  score      Float?
+
+  queryLog QueryLog @relation(fields: [queryLogId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([queryLogId, documentId])
+  @@map("query_documents")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Formula {
+  id           String   @id @default(cuid())
+  name         String
+  expression   String   @db.Text
+  domain       String
+  variables    Json
+  description  String?  @db.Text
+  sourceDocId  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sourceDoc       Document?        @relation(fields: [sourceDocId], references: [id])
+  testSuggestions TestSuggestion[]
+
+  @@index([domain])
+  @@map("formulas")
+}
+
+model TestSuggestion {
+  id                 String  @id @default(cuid())
+  formulaId          String?
+  methodology        String  @db.Text
+  standard           String?
+  parameters         Json?
+  validationCriteria String? @db.Text
+  domain             String
+  createdAt          DateTime @default(now())
+
+  formula Formula? @relation(fields: [formulaId], references: [id])
+
+  @@index([domain])
+  @@map("test_suggestions")
+}
+
+model Annotation {
+  id         String   @id @default(cuid())
+  documentId String
+  userId     String
+  chunkId    String?
+  content    String   @db.Text
+  highlight  String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  document Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user     User           @relation(fields: [userId], references: [id])
+  chunk    DocumentChunk? @relation(fields: [chunkId], references: [id])
+
+  @@index([documentId])
+  @@index([userId])
+  @@map("annotations")
+}

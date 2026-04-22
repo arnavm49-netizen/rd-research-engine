@@ -1,0 +1,159 @@
+# Render Blueprint — R&D Research Engine
+# Deploys: Postgres, Redis, Next.js web, BullMQ worker, FastAPI ML service, Qdrant
+# Storage: configure either Render Disk + MinIO, or use Cloudflare R2 (recommended)
+#
+# After clicking "Apply" in Render, you'll be prompted to:
+#   1. Set ANTHROPIC_API_KEY (sync: false in env group)
+#   2. Set NEXTAUTH_SECRET (generate with: openssl rand -base64 32)
+#   3. Set S3_* values for your file storage (Cloudflare R2 or AWS S3)
+#
+# Estimated cost: ~$32/mo on Render Starter+Standard tiers (free PG/Redis)
+
+databases:
+  - name: rd-postgres
+    databaseName: rdengine
+    user: rdengine
+    plan: free  # 1 GB storage, expires after 90 days idle. Upgrade to starter ($7/mo) for production.
+
+services:
+  # ─── Redis (managed Key-Value store) ───
+  - type: keyvalue
+    name: rd-redis
+    plan: free  # 25 MB. Upgrade to starter for larger queue throughput.
+    ipAllowList: []  # Restrict to internal-only
+
+  # ─── Qdrant Vector DB (private service) ───
+  - type: pserv
+    name: rd-qdrant
+    runtime: image
+    image:
+      url: qdrant/qdrant:latest
+    plan: starter  # 512 MB / 0.5 CPU. Upgrade if vector count > ~500k.
+    disk:
+      name: qdrant-data
+      mountPath: /qdrant/storage
+      sizeGB: 5
+    envVars:
+      - key: QDRANT__SERVICE__GRPC_PORT
+        value: 6334
+
+  # ─── FastAPI ML Service ───
+  - type: web
+    name: rd-ml-service
+    runtime: docker
+    dockerfilePath: ./ml-service/Dockerfile
+    dockerContext: ./ml-service
+    plan: standard  # 2 GB RAM required for PyTorch + sentence-transformers
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: rd-qdrant
+          property: hostport
+        value: "http://${VALUE}:6333"  # Render exposes hostname:port for private services
+      - key: QDRANT_COLLECTION
+        value: research_documents
+      - key: MODEL_CACHE_DIR
+        value: /app/model-cache
+      - key: ANTHROPIC_API_KEY
+        sync: false  # You'll set this in the Render dashboard
+
+  # ─── Next.js Web App ───
+  - type: web
+    name: rd-web
+    runtime: node
+    buildCommand: npm ci && npx prisma generate && npm run build
+    startCommand: npx prisma db push --accept-data-loss && npm start
+    plan: starter  # 512 MB. Upgrade to standard if you have heavy concurrent users.
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rd-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: rd-redis
+          property: connectionString
+      - key: ML_SERVICE_URL
+        fromService:
+          type: web
+          name: rd-ml-service
+          property: hostport
+        value: "http://${VALUE}"
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: rd-qdrant
+          property: hostport
+        value: "http://${VALUE}:6333"
+      - key: QDRANT_COLLECTION
+        value: research_documents
+      - key: NEXTAUTH_URL
+        fromService:
+          type: web
+          name: rd-web
+          property: host
+        value: "https://${VALUE}"
+      - key: NEXTAUTH_SECRET
+        generateValue: true  # Auto-generate a secure secret
+      - key: NODE_ENV
+        value: production
+      # ─── Storage (configure for your provider) ───
+      # For Cloudflare R2:
+      #   S3_ENDPOINT = https://<account-id>.r2.cloudflarestorage.com
+      #   S3_REGION   = auto
+      # For AWS S3:
+      #   S3_ENDPOINT = https://s3.<region>.amazonaws.com
+      #   S3_REGION   = us-east-1 (or your region)
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+
+  # ─── BullMQ Ingestion Worker (background) ───
+  - type: worker
+    name: rd-worker
+    runtime: node
+    buildCommand: npm ci && npx prisma generate
+    startCommand: npm run worker
+    plan: starter  # 512 MB. Worker calls ML service for heavy lifting.
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rd-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: rd-redis
+          property: connectionString
+      - key: ML_SERVICE_URL
+        fromService:
+          type: web
+          name: rd-ml-service
+          property: hostport
+        value: "http://${VALUE}"
+      - key: NODE_ENV
+        value: production
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false

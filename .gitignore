@@ -1,0 +1,63 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next.js
+.next/
+out/
+next-env.d.ts
+
+# production
+build/
+dist/
+
+# env files — NEVER commit
+.env
+.env.local
+.env.production
+.env.*.local
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursor/
+
+# OS
+.DS_Store
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+# Python
+ml-service/__pycache__/
+ml-service/.venv/
+ml-service/*.pyc
+ml-service/**/__pycache__/
+ml-service/.env
+
+# Docker volumes / runtime
+docker-data/
+.runtime-logs/
+
+# Model cache (downloaded at build time, ~100 MB)
+ml-service/model-cache/
+
+# Test artifacts
+/tmp/rd_test*.py
+test-data/
+
+# Prisma
+prisma/migrations/dev.db
+prisma/migrations/dev.db-journal
+
+# Plan files (private)
+.claude/
