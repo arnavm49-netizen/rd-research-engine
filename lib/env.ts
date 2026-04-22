@@ -13,7 +13,9 @@ const envSchema = z.object({
   ML_SERVICE_URL: z.string().url(),
   ANTHROPIC_API_KEY: z.string().optional(),
   NEXTAUTH_SECRET: z.string().min(1),
-  NEXTAUTH_URL: z.string().url(),
+  // Optional in production — NextAuth v5 derives from request headers if absent.
+  // Set this once the final domain is known (custom domain or Render URL).
+  NEXTAUTH_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
