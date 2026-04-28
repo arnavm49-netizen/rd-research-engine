@@ -55,7 +55,7 @@ services:
   - type: web
     name: rd-web
     runtime: node
-    buildCommand: npm ci && npx prisma generate && npm run build
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
     startCommand: npx prisma db push --accept-data-loss && npm start
     plan: starter
     healthCheckPath: /
@@ -97,7 +97,7 @@ services:
   - type: worker
     name: rd-worker
     runtime: node
-    buildCommand: npm ci && npx prisma generate
+    buildCommand: npm ci --include=dev && npx prisma generate
     startCommand: npm run worker
     plan: starter
     autoDeploy: true
