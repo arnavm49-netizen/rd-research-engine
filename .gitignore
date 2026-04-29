@@ -61,3 +61,4 @@ prisma/migrations/dev.db-journal
 
 # Plan files (private)
 .claude/
+tsconfig.tsbuildinfo
