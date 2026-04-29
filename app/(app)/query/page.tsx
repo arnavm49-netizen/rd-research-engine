@@ -46,6 +46,7 @@ export default function QueryPage() {
       const response = await fetch("/api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ query: userMessage }),
       });
 

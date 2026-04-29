@@ -29,7 +29,7 @@ interface QueryResult {
   document_title: string;
   chunk_index: number;
   section_header: string | null;
-  score: float;
+  score: number;
   classification: string;
 }
 
