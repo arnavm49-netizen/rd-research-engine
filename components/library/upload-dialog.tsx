@@ -34,6 +34,7 @@ export function UploadDialog() {
       const response = await fetch("/api/documents", {
         method: "POST",
         body: formData,
+        credentials: "include",
       });
 
       if (!response.ok) {

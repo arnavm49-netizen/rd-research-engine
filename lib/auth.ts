@@ -7,6 +7,10 @@ import { db } from "./db";
 export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: PrismaAdapter(db) as any,
   session: { strategy: "jwt" },
+  // Trust the Host header — required when running behind Render/Cloudflare
+  // proxies. Without this, NextAuth v5 throws "UntrustedHost" on every
+  // /api/auth/* request and every protected API route, blocking login + uploads.
+  trustHost: true,
   pages: {
     signIn: "/login",
   },
