@@ -8,6 +8,7 @@ import { db } from "./db";
 import { uploadFile } from "./storage/s3";
 import { ingestionQueue } from "./queue";
 import { logAudit } from "./audit";
+import { locatePdf } from "./pdf-locator";
 
 export interface RawDiscoverResult {
   title: string;
@@ -69,23 +70,13 @@ export async function persistDiscovered(result: RawDiscoverResult) {
 }
 
 /**
- * For arXiv URLs we can fetch the PDF directly. Returns null for sources we
- * can't auto-fetch (most journals paywall the PDF).
- */
-function pdfUrlFor(paper: { source: string; url: string | null; doi: string | null }): string | null {
-  const url = paper.url || "";
-  if (paper.source === "arxiv" || url.includes("arxiv.org")) {
-    // arxiv.org/abs/2403.01234v1 → arxiv.org/pdf/2403.01234v1.pdf
-    const match = url.match(/arxiv\.org\/abs\/([\w./-]+)/);
-    if (match) return `https://arxiv.org/pdf/${match[1]}.pdf`;
-  }
-  return null;
-}
-
-/**
- * "Approve" a discovered paper. For arXiv we auto-download the PDF and queue
- * it for ingestion. For other sources we mark APPROVED and tell the caller
- * the user needs to upload the PDF manually.
+ * "Approve" a discovered paper. Tries multiple strategies to locate a free
+ * PDF (arXiv URL transform → Unpaywall → Semantic Scholar OA → arXiv title
+ * search) before giving up. Most journal papers have an OA copy somewhere.
+ *
+ * If a PDF is found, it's downloaded, uploaded to R2, and queued for
+ * ingestion. If every strategy fails, we mark APPROVED and ask the user
+ * to upload manually.
  */
 export async function approveDiscovered(
   discoveredPaperId: string,
@@ -98,10 +89,15 @@ export async function approveDiscovered(
   const paper = await db.discoveredPaper.findUnique({ where: { id: discoveredPaperId } });
   if (!paper) throw new Error("Discovered paper not found");
 
-  const pdfUrl = pdfUrlFor(paper);
+  const located = await locatePdf({
+    title: paper.title,
+    doi: paper.doi,
+    url: paper.url,
+    source: paper.source,
+  });
 
-  if (!pdfUrl) {
-    // Can't fetch PDF — just mark approved
+  if (!located) {
+    // No free PDF found — mark approved and ask for manual upload
     await db.discoveredPaper.update({
       where: { id: discoveredPaperId },
       data: { status: "APPROVED" },
@@ -115,18 +111,31 @@ export async function approveDiscovered(
     });
     return {
       status: "manual_upload_required",
-      message: `Approved. ${paper.source} doesn't allow direct PDF fetch — please open the source URL and upload the PDF manually via the Library.`,
+      message: `Approved, but no free PDF found via arXiv, Unpaywall, or Semantic Scholar. Open the source page and upload manually via Library.`,
     };
   }
 
-  // Fetch the PDF
-  const pdfResponse = await fetch(pdfUrl, {
-    headers: { "User-Agent": "RDResearchEngine/1.0 (+https://github.com/arnavm49-netizen/rd-research-engine)" },
+  // Fetch the located PDF
+  const pdfResponse = await fetch(located.url, {
+    headers: {
+      "User-Agent": "RDResearchEngine/1.0 (+https://github.com/arnavm49-netizen/rd-research-engine)",
+      Accept: "application/pdf,*/*",
+    },
+    redirect: "follow",
   });
   if (!pdfResponse.ok) {
-    throw new Error(`Failed to fetch PDF (${pdfResponse.status}): ${pdfUrl}`);
+    throw new Error(`Failed to fetch PDF via ${located.strategy} (${pdfResponse.status}): ${located.url}`);
   }
   const buffer = Buffer.from(await pdfResponse.arrayBuffer());
+
+  // Sanity check — sometimes OA links return an HTML landing page instead
+  // of a real PDF. Reject anything obviously not a PDF.
+  const head = buffer.slice(0, 5).toString("utf-8");
+  if (!head.startsWith("%PDF-")) {
+    throw new Error(
+      `Located URL via ${located.strategy} returned non-PDF content (got ${head.trim()}...). Try uploading manually.`,
+    );
+  }
 
   // Upload to R2
   const safeTitle = paper.title.replace(/[^a-z0-9]+/gi, "_").slice(0, 80);
@@ -172,12 +181,12 @@ export async function approveDiscovered(
     action: "DISCOVERED_PAPER_INGESTED",
     entity: "Document",
     entityId: document.id,
-    metadata: { source: paper.source, discoveredPaperId },
+    metadata: { source: paper.source, discoveredPaperId, pdfStrategy: located.strategy },
   });
 
   return {
     status: "ingestion_queued",
     documentId: document.id,
-    message: `PDF fetched (${(buffer.length / 1024).toFixed(0)} KB). Ingestion queued.`,
+    message: `PDF fetched via ${located.strategy} (${(buffer.length / 1024).toFixed(0)} KB). Ingestion queued.`,
   };
 }

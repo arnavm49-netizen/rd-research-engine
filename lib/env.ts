@@ -1,3 +1,14 @@
+/**
+ * Environment validation.
+ *
+ * Schema covers env vars used by the Node.js side (web app + worker).
+ * Variables specific to the Python ML service (QDRANT_*, ANTHROPIC_API_KEY)
+ * are NOT validated here — that service has its own env loader.
+ *
+ * NEXTAUTH_SECRET is only required in the web app, not the worker.
+ * It's marked optional here, and NextAuth itself will throw a clearer
+ * error if it's missing when actually needed.
+ */
 import { z } from "zod";
 
 const envSchema = z.object({
@@ -8,14 +19,14 @@ const envSchema = z.object({
   S3_SECRET_KEY: z.string().min(1),
   S3_BUCKET: z.string().min(1),
   S3_REGION: z.string().default("us-east-1"),
-  QDRANT_URL: z.string().url(),
-  QDRANT_COLLECTION: z.string().default("research_documents"),
   ML_SERVICE_URL: z.string().url(),
-  ANTHROPIC_API_KEY: z.string().optional(),
-  NEXTAUTH_SECRET: z.string().min(1),
-  // Optional in production — NextAuth v5 derives from request headers if absent.
-  // Set this once the final domain is known (custom domain or Render URL).
+  // Web-only — worker doesn't need it. NextAuth will surface a clearer
+  // error than zod if it's actually missing at request time.
+  NEXTAUTH_SECRET: z.string().min(1).optional(),
+  // Web-only — NextAuth v5 derives from request headers if absent.
   NEXTAUTH_URL: z.string().url().optional(),
+  // Email used by Unpaywall API (free, just needs a contact address)
+  UNPAYWALL_EMAIL: z.string().email().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

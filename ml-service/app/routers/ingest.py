@@ -12,6 +12,18 @@ from app.services.claude_client import translate_text
 router = APIRouter()
 
 
+@router.delete("/document/{document_id}")
+async def delete_document_vectors(document_id: str, request: Request):
+    """Remove all Qdrant vectors for a document. Called when a document is
+    deleted from the Library so RAG queries stop returning it."""
+    vector_store = request.app.state.vector_store
+    try:
+        vector_store.delete_by_document(document_id)
+        return {"deleted": True, "document_id": document_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("", response_model=IngestResponse)
 async def ingest_document(req: IngestRequest, request: Request):
     """Full ingestion pipeline: download → extract → chunk → embed → store."""
